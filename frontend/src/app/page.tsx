@@ -59,6 +59,7 @@ export default function Home() {
   const prevFpRef = useRef("");
   const fgRef = useRef<any>(null);
   const forceConfigured = useRef(false);
+  const degreeRef = useRef<Map<string, number>>(new Map());
 
   /* ---- data fetching ---- */
   const fetchGraph = useCallback(async () => {
@@ -121,6 +122,20 @@ export default function Home() {
     );
     return { ...data, nodes, links };
   }, [data, showDone]);
+
+  /* ---- degree map (stored in ref so callbacks stay stable) ---- */
+  useMemo(() => {
+    const m = new Map<string, number>();
+    if (filteredData) {
+      for (const link of filteredData.links) {
+        const sid = getId(link.source);
+        const tid = getId(link.target);
+        m.set(sid, (m.get(sid) ?? 0) + 1);
+        m.set(tid, (m.get(tid) ?? 0) + 1);
+      }
+    }
+    degreeRef.current = m;
+  }, [filteredData]);
 
   /* ---- stable callbacks (no state in deps) ---- */
   const handleNodeColor = useCallback(
@@ -226,6 +241,24 @@ export default function Home() {
       const startY = node.y - (textBlockH - lineH) / 2;
       for (let i = 0; i < show.length; i++) {
         ctx.fillText(show[i], node.x, startY + i * lineH);
+      }
+
+      if (!isAction) {
+        const degree = degreeRef.current.get(node.id) ?? 0;
+        if (degree > 0) {
+          const badgeFont = Math.max(16 / globalScale, 4);
+          ctx.font = `bold ${badgeFont}px -apple-system, sans-serif`;
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#ffda44";
+          ctx.strokeStyle = "#0d1117";
+          ctx.lineWidth = 3 / globalScale;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const bx = node.x + radius * 0.8;
+          const by = node.y - radius * 0.8;
+          ctx.strokeText(`${degree}`, bx, by);
+          ctx.fillText(`${degree}`, bx, by);
+        }
       }
 
       ctx.restore();
