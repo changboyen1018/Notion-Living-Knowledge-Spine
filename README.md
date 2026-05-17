@@ -4,6 +4,11 @@
 
 > Any leader or teammate who wants to know the latest about the entire project now comes and looks into the spine map to get a holistic view.
 
+**Hackathon Theme:** The Autonomous Sidekick — the system notices new meeting notes, decides what concepts to extract, and builds a living knowledge graph while you focus on your work.
+
+**Live Demo:** [frontend-wheat-one-20.vercel.app](https://frontend-wheat-one-20.vercel.app)  
+**Repo:** [github.com/changboyen1018/Notion-Living-Knowledge-Spine](https://github.com/changboyen1018/Notion-Living-Knowledge-Spine)
+
 ## Notion Developer Platform Features Used
 
 | Feature | How We Use It |
@@ -18,25 +23,25 @@
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Notion Workspace                      │
-│                                                          │
-│  Talks (Meeting Recordings)                              │
-│       │                                                  │
-│       ▼                                                  │
-│  Meeting Notes DB ──► Custom Agent ──► Worker Tools      │
-│  (registry)           (AI brain)       (6 tools)         │
-│                           │                              │
-│              ┌────────────┼────────────┐                 │
-│              ▼            ▼            ▼                  │
-│       Project Log    Relationships   Action Items         │
-│       (nodes)        (edges)         (tasks)              │
-│              └────────────┼────────────┘                  │
-│                           │                              │
-│                           ▼                              │
-│              Interactive Knowledge Graph                  │
-│              (embedded Vercel frontend)                   │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      Notion Workspace                        │
+│                                                              │
+│  Talks (Meeting Recordings via Notion AI Meeting Notes)      │
+│       │                                                      │
+│       ▼                                                      │
+│  Meeting Notes DB ──► Custom Agent ──► Worker Tools (6)      │
+│  (registry)           (AI brain)       (deployed via ntn)    │
+│                           │                                  │
+│              ┌────────────┼────────────┐                     │
+│              ▼            ▼            ▼                     │
+│       Project Log    Relationships   Action Items            │
+│       (nodes)        (edges)         (tasks)                 │
+│              └────────────┼────────────┘                     │
+│                           │                                  │
+│                           ▼                                  │
+│              Interactive Knowledge Graph                     │
+│              (embedded Vercel frontend)                      │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### File Structure
@@ -122,6 +127,62 @@
 | `listKnowledgeNodes` | List all existing nodes | _(none)_ |
 | `markMeetingProcessed` | Mark a meeting note as processed | `meetingNoteId` |
 | `generateKnowledgeMap` | Generate Mermaid diagram | `domain` (optional) |
+
+## Notion Workflow (End-to-End)
+
+### How data flows from a meeting to the graph
+
+```
+1. MEETING HAPPENS
+   └── Team uses Notion AI Meeting Notes (inside Talks page)
+       └── Auto-generates: transcript + summary + action items
+
+2. MEETING NOTES DB (registry — manually or agent-populated)
+   └── Each entry links to the original meeting page via "Note page" URL
+   └── Status starts as "unprocessed"
+
+3. CUSTOM AGENT TRIGGERS
+   └── Reads all "unprocessed" entries from Meeting Notes DB
+   └── Opens the linked meeting page, reads the transcript
+   └── Calls Worker Tools to extract structured knowledge:
+
+       listKnowledgeNodes  →  reads Project Log    →  "what concepts exist already?"
+       addKnowledgeNode    →  writes Project Log   →  creates new concept node
+       updateKnowledgeNode →  writes Project Log   →  enriches existing node summary
+       addRelationship     →  writes Relationships →  connects two nodes
+       markMeetingProcessed→  writes Meeting Notes →  sets Status = "processed"
+
+4. FRONTEND AUTO-REFRESHES (every 10 seconds)
+   └── /api/graph reads: Project Log + Relationships + Action Items + Meeting Notes
+   └── Renders interactive force-directed graph
+```
+
+### Worker Tools ↔ Database ↔ Frontend Mapping
+
+Worker Tools and the Frontend **never communicate directly**. Notion databases are the shared contract:
+
+| Worker Tool | Writes To | Frontend Reads |
+|-------------|-----------|----------------|
+| `addKnowledgeNode` | Project Log (creates row) | Nodes on graph |
+| `updateKnowledgeNode` | Project Log (updates Summary) | Updated hover tooltip |
+| `addRelationship` | Relationships (creates row) | Edges on graph |
+| `listKnowledgeNodes` | _(reads Project Log)_ | — |
+| `markMeetingProcessed` | Meeting Notes (updates Status) | Source meeting links in tooltip |
+| `generateKnowledgeMap` | _(reads all DBs)_ | — |
+| _(Custom Agent)_ | Action Items (creates rows) | Square nodes on graph |
+
+### How Databases Were Established
+
+| Database | Created By | Method |
+|----------|-----------|--------|
+| Meeting Notes | Team member | Manually in Notion UI |
+| Project Log | Team member | Manually in Notion UI |
+| Action Items | Team member | Manually / Notion AI Meeting Notes |
+| Relationships | Integration | Programmatically via Notion API (`databases.create`) |
+| Recall Paths | Integration | Programmatically via Notion API |
+| Change Log | Integration | Programmatically via Notion API |
+
+**Custom Agents do not create databases.** They only populate and update existing databases by calling Worker Tools. The database schemas (columns, types, relations) are defined at creation time.
 
 ## Frontend (Interactive Graph)
 
@@ -228,6 +289,18 @@ Frontend API (/api/graph reads all 4 DBs)
 Interactive Knowledge Graph (force-directed, auto-refreshing)
 ```
 
+## Built at Notion Developer Platform Hackathon (May 2026)
+
+**Theme:** The Autonomous Sidekick — notices new meeting notes, extracts concepts, and builds a living knowledge graph autonomously.
+
+**What makes this creative:**
+- Turns unstructured meeting transcripts into a structured, navigable knowledge graph
+- Entirely Notion-native — no external AI APIs required (Custom Agent handles extraction)
+- Interactive visualization embedded directly in Notion as a team homepage
+- Any teammate can hover on a node and instantly understand where a project stands
+
+**Notion Platform features used:** Workers, Custom Agents, Agent Tools, Notion API, `ntn` CLI, Environment Secrets
+
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE)

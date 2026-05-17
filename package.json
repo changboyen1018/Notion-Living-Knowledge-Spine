@@ -2,7 +2,8 @@
   "name": "living-knowledge-spine",
   "version": "0.1.0",
   "description": "Notion Worker that turns scattered notes into an evolving visual knowledge backbone",
-  "private": true,
+  "private": false,
+  "license": "MIT",
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
