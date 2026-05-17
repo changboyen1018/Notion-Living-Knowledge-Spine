@@ -1,218 +1,233 @@
 # Living Knowledge Spine
 
-**Living Knowledge Spine** is a Notion-native AI system that turns messy daily voice notes, meeting notes, and fragmented work updates into an evolving visual knowledge structure.
+**Living Knowledge Spine** turns scattered meeting notes into a live, interactive knowledge graph — built entirely on the Notion Developer Platform.
 
-> Notion should not only store what I wrote; it should continuously organize what I understand.
+> Any leader or teammate who wants to know the latest about the entire project now comes and looks into the spine map to get a holistic view.
 
-Instead of organizing notes manually, users simply add a messy note into Notion. The system extracts concepts and relationships, updates a visual knowledge backbone, and enables structured recall — so users can navigate from a high-level concept down to the specific detail they need.
+## Notion Developer Platform Features Used
+
+| Feature | How We Use It |
+|---------|---------------|
+| **Notion Workers** | 6 agent tools deployed via `ntn` CLI — the backend that reads/writes Notion databases |
+| **Custom Agents** | AI-powered orchestrator that processes meeting notes, extracts concepts, and calls worker tools |
+| **Agent Tools** | Structured tool schemas (`j.object`, `j.string`, `j.enum`) with typed inputs/outputs |
+| **Notion API** | `databases.query`, `pages.create`, `pages.update`, `blocks.children.list` for all data operations |
+| **Notion CLI (`ntn`)** | Worker deployment, environment variable management, local testing via `ntn workers exec` |
+| **Environment Secrets** | `ntn workers env set` for API tokens and database IDs |
 
 ## Architecture
 
-Built as a **Notion Worker** (TypeScript) with four agent tools, deployed via the `ntn` CLI.
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Notion Workspace                      │
+│                                                          │
+│  Talks (Meeting Recordings)                              │
+│       │                                                  │
+│       ▼                                                  │
+│  Meeting Notes DB ──► Custom Agent ──► Worker Tools      │
+│  (registry)           (AI brain)       (6 tools)         │
+│                           │                              │
+│              ┌────────────┼────────────┐                 │
+│              ▼            ▼            ▼                  │
+│       Project Log    Relationships   Action Items         │
+│       (nodes)        (edges)         (tasks)              │
+│              └────────────┼────────────┘                  │
+│                           │                              │
+│                           ▼                              │
+│              Interactive Knowledge Graph                  │
+│              (embedded Vercel frontend)                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### File Structure
 
 ```
-src/
-├── index.ts                         # Worker entry — registers all 4 tools
-├── tools/
-│   ├── updateKnowledgeSpine.ts      # Process note → extract → update DBs
-│   ├── findRecallPath.ts            # Query → structured recall path
-│   ├── generateKnowledgeMap.ts      # Build Mermaid diagram from graph
-│   └── detectKnowledgeGaps.ts       # Find weak/missing nodes
-├── lib/
-│   ├── extraction.ts                # OpenAI-based concept extraction
-│   ├── graph.ts                     # In-memory graph + BFS path-finding
-│   ├── notion-helpers.ts            # Notion API wrappers
-│   └── types.ts                     # Shared TypeScript types
-└── setup/
-    └── seed.ts                      # Sample data seeder
+├── src/                          # Notion Worker (backend)
+│   ├── index.ts                  # Entry point — registers 6 tools
+│   ├── tools/
+│   │   ├── addKnowledgeNode.ts   # Create a concept/component/decision/question
+│   │   ├── updateKnowledgeNode.ts # Enrich an existing node with new info
+│   │   ├── addRelationship.ts    # Connect two nodes (depends_on, feeds_into, etc.)
+│   │   ├── listKnowledgeNodes.ts # List all nodes (agent checks before creating duplicates)
+│   │   ├── markMeetingProcessed.ts # Mark a meeting note as done
+│   │   └── generateKnowledgeMap.ts # Generate Mermaid diagram of the graph
+│   ├── lib/
+│   │   ├── notion-helpers.ts     # Notion API wrappers + getNotionClient fallback
+│   │   ├── extraction.ts         # OpenAI concept extraction (optional, keyword fallback)
+│   │   ├── graph.ts              # In-memory graph + BFS path-finding
+│   │   └── types.ts              # Shared TypeScript types
+│   └── setup/
+│       └── seed.ts               # Sample data seeder
+│
+├── frontend/                     # Next.js interactive graph (deployed to Vercel)
+│   └── src/app/
+│       ├── page.tsx              # Force-directed graph with hover tooltips
+│       ├── layout.tsx            # Root layout
+│       └── api/graph/route.ts    # API: reads Project Log + Relationships + Action Items
+│
+├── workers.json                  # Notion Worker config (auto-generated by ntn)
+├── package.json                  # Worker dependencies
+└── tsconfig.json                 # TypeScript config
 ```
 
-## Agent Tools
+## Notion Databases (Actual Schema)
 
-| Tool | Purpose |
-|------|---------|
-| **updateKnowledgeSpine** | Process a raw note: extract concepts & relationships via AI, create/update knowledge nodes, log changes |
-| **findRecallPath** | Given a question, find a structured path from root concept → branch → detail |
-| **generateKnowledgeMap** | Generate a Mermaid diagram of the full knowledge graph |
-| **detectKnowledgeGaps** | Identify low-confidence nodes, orphans, open questions, stale entries |
+### Meeting Notes (input registry)
+| Property | Type | Description |
+|----------|------|-------------|
+| Title | title | Meeting name |
+| Status | select | `unprocessed`, `processing`, `processed`, `failed` |
+| Note page | url | Link to the actual meeting page with transcript |
+| Project | relation → Project Log | Which project(s) this meeting relates to |
+| Last Processed at | date | When the pipeline last ran |
+| Failure reason | rich_text | Error details if processing failed |
 
-## Prerequisites
+### Project Log (knowledge nodes)
+| Property | Type | Description |
+|----------|------|-------------|
+| Project | title | Concept/component/system name |
+| Summary | rich_text | AI-generated or human-written summary |
+| Type | select | `system`, `component`, `concept`, `decision`, `question` |
+| Last Updated | date | Auto-updated on changes |
+| Meeting Notes | relation → Meeting Notes | Source meetings |
 
-- **Node.js** 22+
-- **npm** 10+
-- **Notion CLI** (`ntn`)
-- **OpenAI API key** (for concept extraction)
-- A **Notion workspace** on Business plan or above (required for Workers)
+### Relationships (edges)
+| Property | Type | Description |
+|----------|------|-------------|
+| Name | title | "Source → Target" label |
+| Source Node | relation → Project Log | |
+| Target Node | relation → Project Log | |
+| Relationship Type | select | `depends_on`, `feeds_into`, `owned_by`, `blocked_by`, `related_to`, `part_of` |
+| Evidence | rich_text | Quote supporting this relationship |
+| Confidence | number | 0–1 confidence score |
+
+### Action Items
+| Property | Type | Description |
+|----------|------|-------------|
+| Action item | title | Task description |
+| Status | status | `Not started`, `In progress`, `Done` |
+| Project | relation → Project Log | Tagged project |
+| Meeting Source | relation → Meeting Notes | Source meeting |
+| Assignee | people | Who owns this |
+| Context | rich_text | Additional context |
+| Due | date | Deadline |
+
+## Worker Tools (6 deployed)
+
+| Tool | Description | Input |
+|------|-------------|-------|
+| `addKnowledgeNode` | Create a new concept node | `name`, `type`, `summary`, `meetingNoteId` |
+| `updateKnowledgeNode` | Update an existing node's summary | `nodeId`, `newSummary` |
+| `addRelationship` | Create an edge between two nodes | `sourceNodeId`, `targetNodeId`, `relationshipType`, `evidence`, `label` |
+| `listKnowledgeNodes` | List all existing nodes | _(none)_ |
+| `markMeetingProcessed` | Mark a meeting note as processed | `meetingNoteId` |
+| `generateKnowledgeMap` | Generate Mermaid diagram | `domain` (optional) |
+
+## Frontend (Interactive Graph)
+
+Deployed at: **https://frontend-wheat-one-20.vercel.app**
+
+- Force-directed graph using `react-force-graph-2d`
+- **Project nodes** (circles) with colored types
+- **Action item nodes** (squares) with status colors: gray=pending, yellow=in progress, green=done
+- **Short labels** on graph (2-3 keywords), full text on hover
+- **Hover tooltip** shows: full name, type badge, status badge, summary, linked meeting sources (clickable), and "Open in Notion" link
+- **Click** any node to open it directly in Notion
+- **"Show done" toggle** hides completed items by default
+- **Auto-refreshes** every 10 seconds
+- **Embeddable** in Notion via iframe (`X-Frame-Options: ALLOWALL`)
+
+## Custom Agent Instructions
+
+The Custom Agent is the AI brain that orchestrates the pipeline. Set up a Custom Agent in Notion with these instructions:
+
+> You are the Living Knowledge Spine agent. When triggered, you process unprocessed meeting notes and build a structured knowledge graph.
+>
+> **Workflow for each unprocessed meeting note:**
+> 1. Call `listKnowledgeNodes` to see what concepts already exist
+> 2. Read the meeting note's linked page content
+> 3. Extract 3-8 key concepts discussed in the meeting
+> 4. For each concept: call `addKnowledgeNode` (new) or `updateKnowledgeNode` (exists)
+> 5. Call `addRelationship` to connect related concepts
+> 6. Call `markMeetingProcessed` when done
+>
+> **Node types:** system, component, concept, decision, question
+> **Relationship types:** depends_on, feeds_into, owned_by, blocked_by, related_to, part_of
 
 ## Setup
 
-### 1. Install the Notion CLI
+### 1. Deploy the Worker
 
 ```bash
+# Install Notion CLI
 curl -fsSL https://ntn.dev | bash
-```
 
-### 2. Clone and install
-
-```bash
+# Clone and deploy
 git clone https://github.com/changboyen1018/Notion-Living-Knowledge-Spine.git
 cd Notion-Living-Knowledge-Spine
+ntn login
+ntn workers deploy --name living-knowledge-spine
+```
+
+### 2. Set Environment Variables
+
+```bash
+ntn workers env set "NOTION_API_TOKEN=ntn_your_token"
+ntn workers env set "MEETING_NOTES_DB_ID=your_db_id"
+ntn workers env set "PROJECT_LOG_DB_ID=your_db_id"
+ntn workers env set "RELATIONSHIPS_DB_ID=your_db_id"
+```
+
+### 3. Deploy the Frontend
+
+```bash
+cd frontend
 npm install
+npx vercel --prod \
+  -e NOTION_API_TOKEN=ntn_your_token \
+  -e PROJECT_LOG_DB_ID=your_db_id \
+  -e RELATIONSHIPS_DB_ID=your_db_id \
+  -e ACTION_ITEMS_DB_ID=your_db_id \
+  -e MEETING_NOTES_DB_ID=your_db_id
 ```
 
-### 3. Create Notion databases
+### 4. Embed in Notion
 
-Create these 5 databases in your Notion workspace:
+Paste the Vercel URL into a Notion `/embed` block on your homepage.
 
-**Raw Notes**
-| Property | Type | Notes |
-|----------|------|-------|
-| Name | Title | Auto title for the note |
-| Date | Date | When the note was captured |
-| Source Type | Select | Options: `voice`, `meeting`, `manual`, `slack` |
-| Raw Transcript | Rich Text | The full note content |
-| Domain | Select | Knowledge domain (e.g. "Cardio Risk Engine") |
-| Processed | Checkbox | Whether the note has been processed |
+### 5. Set Up the Custom Agent
 
-**Knowledge Nodes**
-| Property | Type | Notes |
-|----------|------|-------|
-| Name | Title | Concept name |
-| Type | Select | Options: `system`, `component`, `concept`, `decision`, `question` |
-| Summary | Rich Text | 1-2 sentence description |
-| Parent Node | Relation → self | Hierarchical parent |
-| Source Notes | Relation → Raw Notes | Notes that contributed to this node |
-| Confidence | Number (0-1) | How well-evidenced this concept is |
-| Last Updated | Date | Auto-updated on changes |
-| Domain | Select | Knowledge domain |
-
-**Relationships**
-| Property | Type | Notes |
-|----------|------|-------|
-| Name | Title | Auto: "Source → Target" |
-| Source Node | Relation → Knowledge Nodes | |
-| Relationship Type | Select | Options: `depends_on`, `feeds_into`, `owned_by`, `blocked_by`, `related_to`, `part_of` |
-| Target Node | Relation → Knowledge Nodes | |
-| Evidence | Rich Text | Quote from source note |
-| Confidence | Number (0-1) | |
-
-**Recall Paths**
-| Property | Type | Notes |
-|----------|------|-------|
-| Question | Title | The user's recall query |
-| Path Nodes | Rich Text | JSON array of path steps |
-| Explanation | Rich Text | Human-readable recall path |
-| Source Evidence | Rich Text | Supporting evidence |
-
-**Change Log**
-| Property | Type | Notes |
-|----------|------|-------|
-| Entry | Title | Auto: "changeType: nodeName" |
-| Date | Date | |
-| Updated Node | Relation → Knowledge Nodes | |
-| Change Type | Select | Options: `created`, `updated`, `merged`, `linked` |
-| Source Note | Relation → Raw Notes | |
-
-### 4. Store secrets
-
-```bash
-# OpenAI API key
-ntn workers secret set OPENAI_API_KEY
-
-# Database IDs (find in each database's URL: notion.so/<workspace>/<DATABASE_ID>)
-ntn workers secret set RAW_NOTES_DB_ID
-ntn workers secret set KNOWLEDGE_NODES_DB_ID
-ntn workers secret set RELATIONSHIPS_DB_ID
-ntn workers secret set RECALL_PATHS_DB_ID
-ntn workers secret set CHANGE_LOG_DB_ID
-```
-
-For local testing, copy `.env.example` to `.env` and fill in the values.
-
-### 5. Seed sample data (optional)
-
-```bash
-npm run seed
-```
-
-This populates the Raw Notes database with 5 realistic notes from a fictional "Cardio Risk Engine" project.
-
-### 6. Deploy
-
-```bash
-ntn workers deploy
-```
-
-### 7. Connect to a Custom Agent
-
-In Notion, go to **Settings → Connections → Custom Agents** and attach this worker. Enable the tools you want the agent to use.
-
-## Usage
-
-### Process a note
-
-```bash
-ntn workers exec updateKnowledgeSpine -d '{"noteId": "your-note-page-id"}'
-```
-
-The tool reads the note, extracts concepts via OpenAI, creates/updates knowledge nodes and relationships, and returns a change summary.
-
-### Recall knowledge
-
-```bash
-ntn workers exec findRecallPath -d '{"query": "report generation"}'
-```
-
-Returns a structured path: Root → Branch → Component → Detail, with summaries at each level.
-
-### Generate a knowledge map
-
-```bash
-ntn workers exec generateKnowledgeMap -d '{"domain": null}'
-```
-
-Returns a Mermaid diagram string:
-
-```mermaid
-graph TD
-    N0["Cardio Risk Engine"]
-    N1["Feature Extractor"]
-    N2["Prediction Model"]
-    N3["Output Aggregator"]
-    N4["Report Generator"]
-    N0 -->|"part of"| N1
-    N0 -->|"part of"| N2
-    N1 -->|"feeds into"| N2
-    N2 -->|"feeds into"| N3
-    N3 -->|"feeds into"| N4
-```
-
-### Detect knowledge gaps
-
-```bash
-ntn workers exec detectKnowledgeGaps -d '{"domain": null, "staleDays": 14}'
-```
-
-Returns prioritised gaps: open questions, low-confidence nodes, orphans, and stale entries.
+Go to **Settings → Custom Agents**, create an agent, attach this worker, and paste the instructions above.
 
 ## How It Works
 
-1. User writes or records a messy note → saved to **Raw Notes** database
-2. User (or agent) calls **updateKnowledgeSpine** with the note ID
-3. The tool sends the note text to OpenAI, which extracts concepts, relationships, and open questions
-4. Each concept is fuzzy-matched against existing **Knowledge Nodes** — matched nodes are updated (confidence increases), new nodes are created
-5. Relationships are added to the **Relationships** database
-6. All changes are logged to the **Change Log**
-7. The note is marked as processed
-8. Later, the user can **findRecallPath** to navigate from a high-level system down to specific details, or **generateKnowledgeMap** for a visual overview
+1. **Meeting happens** → Notion AI Meeting Notes captures transcript
+2. **Custom Agent triggers** → reads unprocessed meeting notes
+3. **Agent calls worker tools** → extracts concepts, creates/updates Project Log entries, builds relationships
+4. **Frontend auto-refreshes** → interactive graph updates every 10 seconds
+5. **User hovers on nodes** → sees summary, status, source meetings with clickable links
+6. **User clicks nodes** → jumps directly to Notion page
 
-## Local Testing
+## Data Flow
 
-```bash
-# Copy env template
-cp .env.example .env
-# Fill in your Notion token and database IDs
-
-# Run a tool locally
-ntn workers exec updateKnowledgeSpine --local -d '{"noteId": "..."}'
 ```
+Meeting Recording
+    ↓
+Notion AI Meeting Notes (transcript + summary + action items)
+    ↓
+Meeting Notes DB (registry with status tracking)
+    ↓
+Custom Agent (AI reads content, extracts concepts)
+    ↓
+Worker Tools (addKnowledgeNode, addRelationship, markMeetingProcessed)
+    ↓
+Project Log + Relationships + Action Items (structured Notion DBs)
+    ↓
+Frontend API (/api/graph reads all 4 DBs)
+    ↓
+Interactive Knowledge Graph (force-directed, auto-refreshing)
+```
+
+## License
+
+MIT
