@@ -13,7 +13,7 @@
     "npm": ">=10.9.2"
   },
   "dependencies": {
-    "@notionhq/client": "^2.2.0",
+    "@notionhq/client": "^5.21.0",
     "@notionhq/workers": ">=0.0.0"
   },
   "devDependencies": {

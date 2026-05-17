@@ -25,12 +25,13 @@ export function getDbIds() {
     relationships: process.env.RELATIONSHIPS_DB_ID,
     changeLog: process.env.CHANGE_LOG_DB_ID,
     recallPaths: process.env.RECALL_PATHS_DB_ID,
+    actionItems: process.env.ACTION_ITEMS_DB_ID,
   };
 }
 
 /** Get a Notion client — uses context.notion if available, otherwise creates from env token. */
 export function getNotionClient(contextNotion?: any): NotionClient {
-  if (contextNotion?.pages?.retrieve && contextNotion?.databases?.query) {
+  if (contextNotion?.request && contextNotion?.pages?.retrieve) {
     return contextNotion;
   }
   const token = process.env.NOTION_API_TOKEN;
