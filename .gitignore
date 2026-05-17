@@ -4,6 +4,7 @@ dist/
 .env.local
 *.log
 .DS_Store
+.cursor/
 frontend/.env.local
 frontend/.next/
 frontend/node_modules/
