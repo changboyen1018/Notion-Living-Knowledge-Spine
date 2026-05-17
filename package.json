@@ -1,0 +1,24 @@
+{
+  "name": "living-knowledge-spine",
+  "version": "0.1.0",
+  "description": "Notion Worker that turns scattered notes into an evolving visual knowledge backbone",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "seed": "npx tsx src/setup/seed.ts"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.9.2"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.0",
+    "@notionhq/workers": ">=0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.8.0"
+  }
+}
