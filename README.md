@@ -66,7 +66,7 @@
 │
 ├── frontend/                     # Next.js interactive graph (deployed to Vercel)
 │   └── src/app/
-│       ├── page.tsx              # Force-directed graph with hover tooltips
+│       ├── page.tsx              # Mind-map style knowledge graph with detail panel
 │       ├── layout.tsx            # Root layout
 │       └── api/graph/route.ts    # API: reads Project Log + Relationships + Action Items
 │
@@ -152,9 +152,9 @@
        addRelationship     →  writes Relationships →  connects two nodes
        markMeetingProcessed→  writes Meeting Notes →  sets Status = "processed"
 
-4. FRONTEND AUTO-REFRESHES (every 10 seconds)
+4. FRONTEND AUTO-REFRESHES (every 5 seconds)
    └── /api/graph reads: Project Log + Relationships + Action Items + Meeting Notes
-   └── Renders interactive force-directed graph
+   └── Renders interactive force-directed knowledge graph
 ```
 
 ### Worker Tools ↔ Database ↔ Frontend Mapping
@@ -169,7 +169,7 @@ Worker Tools and the Frontend **never communicate directly**. Notion databases a
 | `listKnowledgeNodes` | _(reads Project Log)_ | — |
 | `markMeetingProcessed` | Meeting Notes (updates Status) | Source meeting links in tooltip |
 | `generateKnowledgeMap` | _(reads all DBs)_ | — |
-| _(Custom Agent)_ | Action Items (creates rows) | Square nodes on graph |
+| _(Custom Agent)_ | Action Items (creates rows) | Small circle nodes on graph |
 
 ### How Databases Were Established
 
@@ -189,13 +189,13 @@ Worker Tools and the Frontend **never communicate directly**. Notion databases a
 Deployed at: **https://frontend-wheat-one-20.vercel.app**
 
 - Force-directed graph using `react-force-graph-2d`
-- **Project nodes** (circles) with colored types
-- **Action item nodes** (squares) with status colors: gray=pending, yellow=in progress, green=done
-- **Short labels** on graph (2-3 keywords), full text on hover
-- **Hover tooltip** shows: full name, type badge, status badge, summary, linked meeting sources (clickable), and "Open in Notion" link
-- **Click** any node to open it directly in Notion
+- **Mind-map style rendering**: text labels inside circles for intuitive visual scanning
+- **Project nodes**: large glowing circles with bold white text, colored by type (blue=system, green=component, purple=concept, orange=decision) — rendered on top layer for maximum visibility
+- **Action item nodes**: smaller subtle circles with status colors (gray=pending, yellow=in progress, green=done with border highlight)
+- **Click** any node to open a detail panel with full summary, meeting sources, status, and "Open in Notion" link
+- **Drag-to-pin**: drag a node to fix its position
 - **"Show done" toggle** hides completed items by default
-- **Auto-refreshes** every 10 seconds
+- **Auto-refreshes** every 5 seconds (fingerprint-based: no re-render if data unchanged — zero visual disruption)
 - **Embeddable** in Notion via iframe (`X-Frame-Options: ALLOWALL`)
 
 ## Custom Agent Instructions
@@ -265,7 +265,7 @@ Go to **Settings → Custom Agents**, create an agent, attach this worker, and p
 1. **Meeting happens** → Notion AI Meeting Notes captures transcript
 2. **Custom Agent triggers** → reads unprocessed meeting notes
 3. **Agent calls worker tools** → extracts concepts, creates/updates Project Log entries, builds relationships
-4. **Frontend auto-refreshes** → interactive graph updates every 10 seconds
+4. **Frontend auto-refreshes** → interactive graph updates every 5 seconds (no-op if data unchanged)
 5. **User hovers on nodes** → sees summary, status, source meetings with clickable links
 6. **User clicks nodes** → jumps directly to Notion page
 
