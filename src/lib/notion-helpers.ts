@@ -25,6 +25,7 @@ export function getDbIds() {
     relationships: process.env.RELATIONSHIPS_DB_ID,
     changeLog: process.env.CHANGE_LOG_DB_ID,
     recallPaths: process.env.RECALL_PATHS_DB_ID,
+    actionItems: process.env.ACTION_ITEMS_DB_ID,
   };
 }
 

@@ -13,12 +13,13 @@
 
 | Feature | How We Use It |
 |---------|---------------|
-| **Notion Workers** | 6 agent tools deployed via `ntn` CLI — the backend that reads/writes Notion databases |
+| **Notion Workers** | 7 agent tools + 1 scheduled sync (`worker.sync`) — backend that reads/writes Notion databases |
 | **Custom Agents** | AI-powered orchestrator that processes meeting notes, extracts concepts, and calls worker tools |
 | **Agent Tools** | Structured tool schemas (`j.object`, `j.string`, `j.enum`) with typed inputs/outputs |
 | **Notion API** | `databases.query`, `pages.create`, `pages.update`, `blocks.children.list` for all data operations |
 | **Notion CLI (`ntn`)** | Worker deployment, environment variable management, local testing via `ntn workers exec` |
 | **Environment Secrets** | `ntn workers env set` for API tokens and database IDs |
+| **Managed databases + `worker.sync`** | Hourly **Action Item Reminders** sync for triage board (optional; needs `ACTION_ITEMS_DB_ID`) |
 
 ## Architecture
 
@@ -29,7 +30,7 @@
 │  Talks (Meeting Recordings via Notion AI Meeting Notes)      │
 │       │                                                      │
 │       ▼                                                      │
-│  Meeting Notes DB ──► Custom Agent ──► Worker Tools (6)      │
+│  Meeting Notes DB ──► Custom Agent ──► Worker Tools (7) + Sync │
 │  (registry)           (AI brain)       (deployed via ntn)    │
 │                           │                                  │
 │              ┌────────────┼────────────┐                     │
@@ -48,16 +49,20 @@
 
 ```
 ├── src/                          # Notion Worker (backend)
-│   ├── index.ts                  # Entry point — registers 6 tools
+│   ├── index.ts                  # Entry — registers 7 tools + action-item reminders sync
+│   ├── syncs/
+│   │   └── actionItemReminders.ts # Hourly sync → managed "Action Item Reminders" DB
 │   ├── tools/
 │   │   ├── addKnowledgeNode.ts   # Create a concept/component/decision/question
 │   │   ├── updateKnowledgeNode.ts # Enrich an existing node with new info
 │   │   ├── addRelationship.ts    # Connect two nodes (depends_on, feeds_into, etc.)
 │   │   ├── listKnowledgeNodes.ts # List all nodes (agent checks before creating duplicates)
 │   │   ├── markMeetingProcessed.ts # Mark a meeting note as done
-│   │   └── generateKnowledgeMap.ts # Generate Mermaid diagram of the graph
+│   │   ├── generateKnowledgeMap.ts # Generate Mermaid diagram of the graph
+│   │   └── remindActionItems.ts  # Read-only: overdue / due soon / unassigned buckets
 │   ├── lib/
 │   │   ├── notion-helpers.ts     # Notion API wrappers + getNotionClient fallback
+│   │   ├── actionItems.ts        # Shared fetch + categorize for remind tool + sync
 │   │   ├── extraction.ts         # OpenAI concept extraction (optional, keyword fallback)
 │   │   ├── graph.ts              # In-memory graph + BFS path-finding
 │   │   └── types.ts              # Shared TypeScript types
@@ -116,8 +121,9 @@
 | Assignee | people | Who owns this |
 | Context | rich_text | Additional context |
 | Due | date | Deadline |
+| Review Status | checkbox | Unchecked items surface in `remindActionItems` and the hourly reminders sync |
 
-## Worker Tools (6 deployed)
+## Worker Tools (7 deployed)
 
 | Tool | Description | Input |
 |------|-------------|-------|
@@ -127,6 +133,15 @@
 | `listKnowledgeNodes` | List all existing nodes | _(none)_ |
 | `markMeetingProcessed` | Mark a meeting note as processed | `meetingNoteId` |
 | `generateKnowledgeMap` | Generate Mermaid diagram | `domain` (optional) |
+| `remindActionItems` | List action items needing attention (overdue, due soon, unassigned, etc.) | `daysAhead` (optional, default 7) |
+
+### Worker sync (managed database)
+
+| Sync | Schedule | What it does |
+|------|----------|--------------|
+| `syncActionItemReminders` | Every **1 hour** | Replaces rows in the managed **⏰ Action Item Reminders** database so collaborators see a live triage board (same rules as `remindActionItems`). The interval is a conservative default for API usage; adjust `schedule` in `src/syncs/actionItemReminders.ts` if your team needs a different cadence. |
+
+Requires `ACTION_ITEMS_DB_ID` on the worker. Without it, the tool and sync throw a clear error.
 
 ## Notion Workflow (End-to-End)
 
@@ -169,6 +184,8 @@ Worker Tools and the Frontend **never communicate directly**. Notion databases a
 | `listKnowledgeNodes` | _(reads Project Log)_ | — |
 | `markMeetingProcessed` | Meeting Notes (updates Status) | Source meeting links in tooltip |
 | `generateKnowledgeMap` | _(reads all DBs)_ | — |
+| `remindActionItems` | _(reads Action Items)_ | — |
+| `syncActionItemReminders` | Managed **Action Item Reminders** DB (hourly replace) | — |
 | _(Custom Agent)_ | Action Items (creates rows) | Small circle nodes on graph |
 
 ### How Databases Were Established
@@ -212,7 +229,8 @@ The Custom Agent is the AI brain that orchestrates the pipeline. Set up a Custom
 > 5. Call `addRelationship` to connect related concepts
 > 6. Call `markMeetingProcessed` when done
 >
-> **Node types:** system, component, concept, decision, question
+> **Optional — when the user asks about tasks or deadlines (not tied to a meeting):** call `remindActionItems` with `daysAhead` null to summarize overdue, due-soon, and unassigned items from the Action Items database.
+
 > **Relationship types:** depends_on, feeds_into, owned_by, blocked_by, related_to, part_of
 
 ## Setup
@@ -280,7 +298,7 @@ Meeting Notes DB (registry with status tracking)
     ↓
 Custom Agent (AI reads content, extracts concepts)
     ↓
-Worker Tools (addKnowledgeNode, addRelationship, markMeetingProcessed)
+Worker Tools (addKnowledgeNode, addRelationship, markMeetingProcessed, remindActionItems, …) + hourly reminders sync
     ↓
 Project Log + Relationships + Action Items (structured Notion DBs)
     ↓
@@ -299,7 +317,7 @@ Interactive Knowledge Graph (force-directed, auto-refreshing)
 - Interactive visualization embedded directly in Notion as a team homepage
 - Any teammate can hover on a node and instantly understand where a project stands
 
-**Notion Platform features used:** Workers, Custom Agents, Agent Tools, Notion API, `ntn` CLI, Environment Secrets
+**Notion Platform features used:** Workers, Custom Agents, Agent Tools, managed DB + `worker.sync`, Notion API, `ntn` CLI, Environment Secrets
 
 ## License
 
