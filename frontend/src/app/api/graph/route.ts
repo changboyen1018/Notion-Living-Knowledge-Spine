@@ -5,6 +5,7 @@ const notion = new Client({ auth: process.env.NOTION_API_TOKEN });
 const PROJECT_LOG_DB = process.env.PROJECT_LOG_DB_ID!;
 const RELATIONSHIPS_DB = process.env.RELATIONSHIPS_DB_ID;
 const ACTION_ITEMS_DB = process.env.ACTION_ITEMS_DB_ID;
+const MEETING_NOTES_DB = process.env.MEETING_NOTES_DB_ID;
 
 function plain(rt: any[]): string {
   if (!rt?.length) return "";
@@ -13,7 +14,25 @@ function plain(rt: any[]): string {
 
 export async function GET() {
   try {
-    // 1. Fetch Project Log (knowledge nodes / projects)
+    // Build a lookup of meeting note ID → title + URL
+    const meetingLookup: Record<string, { title: string; url: string }> = {};
+    if (MEETING_NOTES_DB) {
+      const meetResp = await notion.databases.query({
+        database_id: MEETING_NOTES_DB,
+        page_size: 100,
+      });
+      for (const page of meetResp.results as any[]) {
+        const p = page.properties;
+        const title = plain(p["Title"]?.title);
+        const noteUrl = p["Note page"]?.url ?? "";
+        meetingLookup[page.id] = {
+          title: title || "Meeting",
+          url: noteUrl || `https://notion.so/${(page.id as string).replace(/-/g, "")}`,
+        };
+      }
+    }
+
+    // 1. Project Log (knowledge nodes)
     const nodesResp = await notion.databases.query({
       database_id: PROJECT_LOG_DB,
       page_size: 100,
@@ -21,6 +40,11 @@ export async function GET() {
 
     const nodes: any[] = nodesResp.results.map((page: any) => {
       const p = page.properties;
+      const meetingRels = p["Meeting Notes"]?.relation ?? [];
+      const sources = meetingRels
+        .map((r: any) => meetingLookup[r.id])
+        .filter(Boolean);
+
       return {
         id: page.id,
         name: plain(p["Project"]?.title),
@@ -28,12 +52,14 @@ export async function GET() {
         type: p["Type"]?.select?.name ?? "concept",
         lastUpdated: p["Last Updated"]?.date?.start ?? null,
         group: "project",
+        sources,
+        notionUrl: `https://notion.so/${(page.id as string).replace(/-/g, "")}`,
       };
     });
 
     const links: any[] = [];
 
-    // 2. Fetch Action Items and link to their projects
+    // 2. Action Items
     if (ACTION_ITEMS_DB) {
       const actionsResp = await notion.databases.query({
         database_id: ACTION_ITEMS_DB,
@@ -47,17 +73,23 @@ export async function GET() {
         const statusObj = p["Status"]?.status;
         const status = statusObj?.name ?? "Not started";
         const projectRels = p["Project"]?.relation ?? [];
+        const meetingRels = p["Meeting Source"]?.relation ?? [];
+        const sources = meetingRels
+          .map((r: any) => meetingLookup[r.id])
+          .filter(Boolean);
 
         if (!actionName) continue;
 
         nodes.push({
           id: page.id,
-          name: actionName.length > 50 ? actionName.slice(0, 47) + "..." : actionName,
+          name: actionName,
           summary: context || actionName,
           type: "action_item",
           status,
           lastUpdated: null,
           group: "action",
+          sources,
+          notionUrl: `https://notion.so/${(page.id as string).replace(/-/g, "")}`,
         });
 
         for (const rel of projectRels) {
@@ -65,14 +97,14 @@ export async function GET() {
             source: rel.id,
             target: page.id,
             type: "has_action",
-            evidence: `Action item for project`,
+            evidence: "",
             confidence: 1,
           });
         }
       }
     }
 
-    // 3. Fetch Relationships (concept-to-concept edges)
+    // 3. Relationships
     if (RELATIONSHIPS_DB) {
       const relsResp = await notion.databases.query({
         database_id: RELATIONSHIPS_DB,
